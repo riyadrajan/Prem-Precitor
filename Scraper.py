@@ -9,11 +9,11 @@ from bs4 import BeautifulSoup
 
 
 def leagueTable(driver):
-    table_element = driver.find_element(By.ID, "stats_squads_standard_for")
+    table_element = driver.find_element(By.ID, "div_stats_standard")
     #print(table_element.text)
     html = table_element.get_attribute('outerHTML')
-    #print(html)
-    '''successfully obtained table data with selenium'''
+    print(html)
+    '''successfully obtained player standard stats table data with selenium'''
     return html
 
 def getTeamLinks(html):
@@ -21,10 +21,10 @@ def getTeamLinks(html):
     soup = BeautifulSoup(html, "html.parser")
     # print(soup)
     '''
-    team links stored in a tag in table row
+    team links stored in 'a' tag in table row
     test by storing them in a list
     '''
-    for i in 
+
 
 def main():
     driver = webdriver.Chrome()
