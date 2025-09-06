@@ -21,54 +21,32 @@ def leagueTable(driver):
     return html
 
 def getTeamLinks(html):
-    '''
-    parse html using beautiful soup
-    print(soup)
-    player links stored in 'a' tag in table row 
-    test by storing them in a list
-    find_all() method does this
-    Objective - create dictionary of value: player link, key: player name pair
-    '''
     soup = BeautifulSoup(html, "html.parser")
-    links = soup.find_all("a") #now have a list of player links
-    player_dict = {} 
-    # uncomment if needed
-    for link in links:
-        href = "https://fbref.com" + link.get('href') 
-        name = link.text.strip()
-        # Only add if href looks like a player link
-        if href and name and '/en/players/' in href:
-            player_dict[name] = href
-    
-    # similarly, find player positions
-    positions = {'CM', 'AM', 'FW', 'LW', 'RW', 'CF', 'SS', 'CAM', 'ST' }
+    player_dict = {}
     rows = soup.find_all("tr")
-    #want to search for (data-stat = "position")
     for row in rows:
+        # Get the first <a> tag in this row (player link) using .find()
+        link = row.find("a")
+        if not link:
+            continue
+        name = link.text.strip()
+        href = "https://fbref.com" + link.get('href')
+
+        # Get the position cell in this row
         pos_cell = row.find('td', {'data-stat': 'position'})
-        if pos_cell:
-            position = pos_cell.text.strip()
-            print(position)
-	    
+        if not pos_cell:
+            continue
+        position = pos_cell.text.strip()
 
+        # Assign both link and position to the player name
+        player_dict[name] = [href, position]
 
-
-    # player_dict.pop('Matches')
     # print(player_dict)
-    '''
-    Since there are too many players to scrape, pop all players who aren't attackers or midfielders
-    '''
+    df = pd.DataFrame.from_dict(player_dict, orient='index', columns=['Link', 'Position'])
+    df.index.name = 'Player'
+    print(df)
+
     return player_dict
-    # #convert to dataframe for easier viewing    
-    # df = pd.DataFrame.from_dict(player_dict, orient='index', columns=['Link'])
-    # df.index.name = 'Player'  # Rename the index to 'Player'
-    # df = df.reset_index()     # Move index to a column
-    # # print(df)
-    # # df = df.drop('Matches', errors='ignore')  # Remove 'Matches'
-
-
-    # # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx" )
-
 
 
 '''
