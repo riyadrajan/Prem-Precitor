@@ -32,37 +32,44 @@ def getTeamLinks(html):
     soup = BeautifulSoup(html, "html.parser")
     links = soup.find_all("a") #now have a list of player links
     player_dict = {} 
+    # uncomment if needed
     for link in links:
         href = "https://fbref.com" + link.get('href') 
         name = link.text.strip()
         # Only add if href looks like a player link
         if href and name and '/en/players/' in href:
             player_dict[name] = href
+    
+    # similarly, find player positions
+    positions = {'CM', 'AM', 'FW', 'LW', 'RW', 'CF', 'SS', 'CAM', 'ST' }
+    rows = soup.find_all("tr")
+    #want to search for (data-stat = "position")
+    for row in rows:
+        pos_cell = row.find('td', {'data-stat': 'position'})
+        if pos_cell:
+            position = pos_cell.text.strip()
+            print(position)
+	    
 
-    player_dict.pop('Matches')
+
+
+    # player_dict.pop('Matches')
+    # print(player_dict)
     '''
-    Since there are two many players to scrape, pop all players who aren't attackers or midfielders
+    Since there are too many players to scrape, pop all players who aren't attackers or midfielders
     '''
-    #convert to dataframe for easier viewing    
-    df = pd.DataFrame.from_dict(player_dict, orient='index', columns=['Link'])
-    df.index.name = 'Player'  # Rename the index to 'Player'
-    df = df.reset_index()     # Move index to a column
-    # print(df)
-    # df = df.drop('Matches', errors='ignore')  # Remove 'Matches'
-
-    # hrefs = [link.get('href') for link in links if link.get('href')]
-    # player_names = [link.text.strip() for link in links]
-    # print(player_names)
-
-    # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx" )
-
-    # for link in links:
-    #     print(link)
-
-    # #clean up links
-    # for tag in tags:
-    #     print(tags)
     return player_dict
+    # #convert to dataframe for easier viewing    
+    # df = pd.DataFrame.from_dict(player_dict, orient='index', columns=['Link'])
+    # df.index.name = 'Player'  # Rename the index to 'Player'
+    # df = df.reset_index()     # Move index to a column
+    # # print(df)
+    # # df = df.drop('Matches', errors='ignore')  # Remove 'Matches'
+
+
+    # # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx" )
+
+
 
 '''
 now access player data for each player(xg, xa)
@@ -145,7 +152,7 @@ def main():
     driver.get(base_url)
     html = leagueTable(driver)
     player_dict = getTeamLinks(html)
-    getPlayerStats(player_dict)
+    # getPlayerStats(player_dict)
     driver.quit()
 
 
