@@ -3,13 +3,28 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 import pandas as pd
+import psycopg2
+from dotenv import load_dotenv
+import os
+import time
 #use selenium to bypass dynamic loading
 #parse html using beautiful soup 
 #convert to pandas df for local use and ML
 #format(player link pair)
 
+load_dotenv()
 #global variables
+conn = psycopg2.connect(
+    host=os.getenv("DB_HOST"),
+    dbname=os.getenv("DB_NAME"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+    port=os.getenv("DB_PORT")
+)
+cur = conn.cursor()
+
 driver = webdriver.Chrome()
+
 
 
 def leagueTable(driver):
@@ -20,6 +35,7 @@ def leagueTable(driver):
     '''successfully obtained player standard stats table data with selenium'''
     return html
 
+# player names are found here as well
 def getTeamLinks(html):
     soup = BeautifulSoup(html, "html.parser")
     player_dict = {}
@@ -37,17 +53,28 @@ def getTeamLinks(html):
         if not pos_cell:
             continue
         position = pos_cell.text.strip()
+        nationality_td = row.find("td", {"data-stat": "nationality"})
+        nationality = nationality_td.get_text(strip=True)
+
 
         # Assign both link and position to the player name
-        player_dict[name] = [href, position]
+        player_dict[name] = [href, position, nationality]
+
+    # Filter by allowed positions
+    allowed_positions = {'CM', 'AM', 'FW', 'LW', 'RW', 'CF', 'SS', 'CAM', 'ST', 'MF'}
+    # Keep player if ANY allowed position is in their position string
+    player_dict = {
+        name: info
+        for name, info in player_dict.items()
+        if any(pos in info[1].split(',') or pos in info[1] for pos in allowed_positions)
+    }
 
     # print(player_dict)
-    df = pd.DataFrame.from_dict(player_dict, orient='index', columns=['Link', 'Position'])
-    df.index.name = 'Player'
-    print(df)
+    # df = pd.DataFrame.from_dict(player_dict, orient='index', columns=['Link', 'Position'])
+    # df.index.name = 'Player'
+    # print(df)
 
     return player_dict
-
 
 '''
 now access player data for each player(xg, xa)
@@ -56,58 +83,49 @@ iterate over the last 5 seasons for each player
 '''
 def getPlayerStats(player_dict):
     seasons = ['2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021']
-    # Outer dict: season -> {player: goals}
-    season_player_goals = {season: {} for season in seasons}
+    # List to hold all player-season records
+    records = []
 
-    for player, url in player_dict.items():
-        driver.get(url)
+    for player, (link, position, nationality) in player_dict.items():
+        driver.get(link)
+        # time.sleep(2)  # Wait 2 seconds between requests (adjust as needed)
         try:
             table_element = driver.find_element(By.ID, "div_stats_standard_dom_lg")
             html = table_element.get_attribute('outerHTML')
             soup = BeautifulSoup(html, "html.parser")
             for season in seasons:
                 goals = getGoals(soup, season)
-                season_player_goals[season][player] = goals
+                records.append({
+                    'Player': player,
+                    'Link': link,
+                    'Position': position,
+                    'Season': season,
+                    'Goals': goals,
+                    'Nationality' : nationality
+                })
         except Exception as e:
             print(f"Error processing {player}: {e}")
             for season in seasons:
-                season_player_goals[season][player] = None
+                records.append({
+                    'Player': player,
+                    'Link': link,
+                    'Position': position,
+                    'Season': season,
+                    'Goals': None,
+                    'Nationality' : None
+                })
 
-    # Convert to DataFrame: index=season, columns=player names, values=goals
-    df = pd.DataFrame.from_dict(season_player_goals, orient='index')
-    df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx" )
+    # Convert to DataFrame
+    df = pd.DataFrame(records)
+    print(df)
+    # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-Position-Goals-df.xlsx", index=False)
+    df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx", index=False)
+    print("Printed to Player-Link-df")
     return df
-
-    # for player in player_dict:
-    #     driver.get(player_dict[player])
-    #     table_element = driver.find_element(By.ID, "div_stats_standard_dom_lg")
-    #     #obtain goals and store it in another dictionary, key: Player Name, value: goals
-    #     html = table_element.get_attribute('outerHTML')
-    #     soup = BeautifulSoup(html, "html.parser")
-    #     getGoals(soup, '2024-2025')
-    #     getGoals(soup, '2023-2024')
-    #     getGoals(soup, '2022-2023')
-    #     getGoals(soup, '2021-2022')
-    #     getGoals(soup, '2020-2021')
-
-    # player = 'Bruno Fernandes'
-    # driver.get(player_dict[player])
-    # table_element = driver.find_element(By.ID, "div_stats_standard_dom_lg")
-    # #obtain goals and store it in another dictionary, key: Player Name, value: goals
-    # html = table_element.get_attribute('outerHTML')
-    # soup = BeautifulSoup(html, "html.parser")
-    # # print(soup.prettify())
-    # individual = {}
-    # seasons = ['2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021']
-    # for season in seasons:
-    #     print(f"Goals ({season}):", getGoals(soup, season))
-    '''
-    Confirming helper function works, and individual test for Bruno Fernandes aligns with website stats
-    Now create df for all players, key: Name, Elements: [Season: Goals]
-    '''
 
     
 def getGoals(soup, season):
+    goals = None
     # gets goals for a specific season
     # Find the row for a specific season 
     season_row = soup.find('tr', {'id': 'stats'}, string=lambda s: s and season in s)
@@ -130,9 +148,25 @@ def main():
     driver.get(base_url)
     html = leagueTable(driver)
     player_dict = getTeamLinks(html)
+
+    for name, (href, position, nationality) in player_dict.items():
+        cur.execute(
+            "INSERT INTO Players (playerName, playerLink, position, Nationality) VALUES (%s, %s, %s, %s)",
+            (name, href, position, nationality)
+        )
     # getPlayerStats(player_dict)
     driver.quit()
-
+    conn.commit()
+    cur.close()
+    conn.close()
 
 if __name__ == "__main__":
     main()
+
+'''
+Note that scrape queue was polulated once with 
+INSERT INTO scrape_queue (player_id)
+SELECT player_id FROM players;
+if the player status is still pending, they need to be processed in the batch
+
+'''

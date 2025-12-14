@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS playerStats (
     FOREIGN KEY (player_id) REFERENCES Players (player_id),
     FOREIGN KEY (season_id) REFERENCES Seasons (season_id)
 );
+            
+CREATE TABLE scrape_queue (
+    player_id INT PRIMARY KEY,
+    status VARCHAR(20) DEFAULT 'pending',
+    last_attempt TIMESTAMP,
+    error_message TEXT
+);
+
 """)
 
 conn.commit()
