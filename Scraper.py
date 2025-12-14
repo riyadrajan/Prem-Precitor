@@ -7,6 +7,8 @@ import psycopg2
 from dotenv import load_dotenv
 import os
 import time
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 #use selenium to bypass dynamic loading
 #parse html using beautiful soup 
 #convert to pandas df for local use and ML
@@ -81,47 +83,124 @@ now access player data for each player(xg, xa)
 scrape from standard stats table
 iterate over the last 5 seasons for each player
 '''
+'''Process players in batches to prevent selenium web driver from timing out'''
 def getPlayerStats(player_dict):
+    batch_size = 10
     seasons = ['2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021']
-    # List to hold all player-season records
-    records = []
+    
+    cur.execute("""
+        SELECT p.player_id, p.playerName, p.playerLink, p.position, p.Nationality
+        FROM Players p
+        JOIN scrape_queue sq ON p.player_id = sq.player_id
+        WHERE sq.status = 'pending'
+        ORDER BY p.player_id
+        LIMIT %s    
+    """, (batch_size,))
 
-    for player, (link, position, nationality) in player_dict.items():
-        driver.get(link)
-        # time.sleep(2)  # Wait 2 seconds between requests (adjust as needed)
+    pending_players = cur.fetchall()
+
+    for player_id, name, link, position, nationality in pending_players:
         try:
-            table_element = driver.find_element(By.ID, "div_stats_standard_dom_lg")
+            print(f"Processing {name}...")
+            driver.get(link)
+            
+            # Wait for the table to load (up to 10 seconds)
+            wait = WebDriverWait(driver, 10)
+            table_element = wait.until(
+                EC.presence_of_element_located((By.ID, "div_stats_standard_dom_lg"))
+            )
+            
             html = table_element.get_attribute('outerHTML')
             soup = BeautifulSoup(html, "html.parser")
+            
             for season in seasons:
                 goals = getGoals(soup, season)
-                records.append({
-                    'Player': player,
-                    'Link': link,
-                    'Position': position,
-                    'Season': season,
-                    'Goals': goals,
-                    'Nationality' : nationality
-                })
+
+                if goals == '' or goals is None:
+                    goals = None
+                else:
+                    goals = int(goals)
+                
+                cur.execute("SELECT season_id FROM Seasons WHERE season_year = %s", (season,))
+                season_result = cur.fetchone()
+                
+                if season_result is not None:
+                    season_id = season_result[0]  # Extract integer from tuple
+                    
+                    cur.execute("""
+                        INSERT INTO playerStats (player_id, season_id, goals, Xg)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (player_id, season_id) 
+                        DO UPDATE SET goals = EXCLUDED.goals, Xg = EXCLUDED.Xg
+                    """, (player_id, season_id, goals, None))
+            
+            # Mark as completed
+            cur.execute("""
+                UPDATE scrape_queue 
+                SET status = 'completed', last_attempt = NOW()
+                WHERE player_id = %s
+            """, (player_id,))
+            
+            conn.commit()  # Commit after each successful player
+            # Add delay between players to avoid rate limiting
+            time.sleep(2)
+
         except Exception as e:
-            print(f"Error processing {player}: {e}")
-            for season in seasons:
-                records.append({
-                    'Player': player,
-                    'Link': link,
-                    'Position': position,
-                    'Season': season,
-                    'Goals': None,
-                    'Nationality' : None
-                })
+            conn.rollback()  # Rollback failed transaction
+            try:
+                cur.execute("""
+                    UPDATE scrape_queue 
+                    SET status = 'failed', last_attempt = NOW(), error_message = %s
+                    WHERE player_id = %s
+                """, (str(e), player_id))
+                conn.commit()
+            except Exception as update_error:
+                print(f"Failed to update error status: {update_error}")
+                conn.rollback()
+    
+    print(f"Batch completed, processed {len(pending_players)} players")
+
+    cur.execute("SELECT COUNT(*) FROM scrape_queue WHERE status = 'pending'")
+    remaining = cur.fetchone()[0]
+    print(f"Remaining pending players: {remaining}")
+    return remaining == 0
+            
+    # for player, (link, position, nationality) in player_dict.items():
+    #     driver.get(link)
+    #     # time.sleep(2)  # Wait 2 seconds between requests (adjust as needed)
+    #     try:
+    #         table_element = driver.find_element(By.ID, "div_stats_standard_dom_lg")
+    #         html = table_element.get_attribute('outerHTML')
+    #         soup = BeautifulSoup(html, "html.parser")
+    #         for season in seasons:
+    #             goals = getGoals(soup, season)
+    #             records.append({
+    #                 'Player': player,
+    #                 'Link': link,
+    #                 'Position': position,
+    #                 'Season': season,
+    #                 'Goals': goals,
+    #                 'Nationality' : nationality
+    #             })
+    #     except Exception as e:
+    #         print(f"Error processing {player}: {e}")
+    #         for season in seasons:
+    #             records.append({
+    #                 'Player': player,
+    #                 'Link': link,
+    #                 'Position': position,
+    #                 'Season': season,
+    #                 'Goals': None,
+    #                 'Nationality' : None
+    #             })
 
     # Convert to DataFrame
-    df = pd.DataFrame(records)
-    print(df)
-    # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-Position-Goals-df.xlsx", index=False)
-    df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx", index=False)
-    print("Printed to Player-Link-df")
-    return df
+    # df = pd.DataFrame(records)
+    # print(df)
+    # # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-Position-Goals-df.xlsx", index=False)
+    # df.to_excel("/Users/riyadrajan/Desktop/Player-Link-df.xlsx", index=False)
+    # print("Printed to Player-Link-df")
+    # return df
 
     
 def getGoals(soup, season):
@@ -154,7 +233,12 @@ def main():
             "INSERT INTO Players (playerName, playerLink, position, Nationality) VALUES (%s, %s, %s, %s)",
             (name, href, position, nationality)
         )
-    # getPlayerStats(player_dict)
+
+    finished = False
+    while (finished is not True) :
+        finished = getPlayerStats(player_dict)
+        time.sleep(5)
+
     driver.quit()
     conn.commit()
     cur.close()
@@ -169,4 +253,7 @@ INSERT INTO scrape_queue (player_id)
 SELECT player_id FROM players;
 if the player status is still pending, they need to be processed in the batch
 
+To be implemented:  get teams/squad for each season for a player
+                    assign a weight of <1 for players outside the prem in previous seasons 
+                    in getGoals, also get expected goals
 '''
