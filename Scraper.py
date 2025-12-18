@@ -55,12 +55,15 @@ def getTeamLinks(html):
         if not pos_cell:
             continue
         position = pos_cell.text.strip()
+        #Get nationality
         nationality_td = row.find("td", {"data-stat": "nationality"})
         nationality = nationality_td.get_text(strip=True)
+        #Get Team
+        team_td = row.find('td', {'data-stat': 'team'})
+        team = team_td.get_text(strip=True)
 
-
-        # Assign both link and position to the player name
-        player_dict[name] = [href, position, nationality]
+        # Player name: attributes
+        player_dict[name] = [href, position, nationality, team]
 
     # Filter by allowed positions
     allowed_positions = {'CM', 'AM', 'FW', 'LW', 'RW', 'CF', 'SS', 'CAM', 'ST', 'MF'}
@@ -228,10 +231,10 @@ def main():
     html = leagueTable(driver)
     player_dict = getTeamLinks(html)
 
-    for name, (href, position, nationality) in player_dict.items():
+    for name, (href, position, nationality, team) in player_dict.items():
         cur.execute(
-            "INSERT INTO Players (playerName, playerLink, position, Nationality) VALUES (%s, %s, %s, %s)",
-            (name, href, position, nationality)
+            "INSERT INTO Players (playerName, playerLink, position, Nationality, Team) VALUES (%s, %s, %s, %s, %s)",
+            (name, href, position, nationality, team)
         )
 
     finished = False
