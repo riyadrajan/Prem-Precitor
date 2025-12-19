@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS playerStats (
     player_id INTEGER,
     season_id INTEGER,
     goals INTEGER,
-    Xg INTEGER,
+    Xg FLOAT,
     PRIMARY KEY (player_id, season_id),
     FOREIGN KEY (player_id) REFERENCES Players (player_id),
     FOREIGN KEY (season_id) REFERENCES Seasons (season_id)

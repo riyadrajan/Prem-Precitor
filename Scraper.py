@@ -117,12 +117,24 @@ def getPlayerStats(player_dict):
             soup = BeautifulSoup(html, "html.parser")
             
             for season in seasons:
-                goals = getGoals(soup, season)
+                # returns list of goals, xg
+                stats = getGoals(soup, season)
 
-                if goals == '' or goals is None:
-                    goals = None
-                else:
-                    goals = int(goals)
+                # Initialize to None
+                goals_value = None
+                xg_value = None
+                
+                if stats and stats[0]:
+                    try:
+                        goals_value = int(stats[0]) 
+                    except (ValueError, TypeError):
+                        goals_value = None
+
+                if stats and stats[1]:
+                    try:
+                        xg_value = float(stats[1]) 
+                    except (ValueError, TypeError):
+                        xg_value = None
                 
                 cur.execute("SELECT season_id FROM Seasons WHERE season_year = %s", (season,))
                 season_result = cur.fetchone()
@@ -135,7 +147,7 @@ def getPlayerStats(player_dict):
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (player_id, season_id) 
                         DO UPDATE SET goals = EXCLUDED.goals, Xg = EXCLUDED.Xg
-                    """, (player_id, season_id, goals, None))
+                    """, (player_id, season_id, goals_value, xg_value ))
             
             # Mark as completed
             cur.execute("""
@@ -208,7 +220,8 @@ def getPlayerStats(player_dict):
     
 def getGoals(soup, season):
     goals = None
-    # gets goals for a specific season
+    xg = None
+    
     # Find the row for a specific season 
     season_row = soup.find('tr', {'id': 'stats'}, string=lambda s: s and season in s)
     if not season_row:
@@ -218,12 +231,17 @@ def getGoals(soup, season):
             if th and th.text.strip() == season:
                 season_row = row
                 break
+    
     if season_row:
         goals_cell = season_row.find('td', {'data-stat': 'goals'})
         if goals_cell:
             goals = goals_cell.text.strip()
-            # print(f"Goals ({season}):", goals)
-    return goals
+            
+        xg_cell = season_row.find('td', {'data-stat': 'xg'})
+        if xg_cell:  # ← FIX: check xg_cell, not xg
+            xg = xg_cell.text.strip()
+
+    return [goals, xg]
 
 def main():
     base_url = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
@@ -231,11 +249,11 @@ def main():
     html = leagueTable(driver)
     player_dict = getTeamLinks(html)
 
-    for name, (href, position, nationality, team) in player_dict.items():
-        cur.execute(
-            "INSERT INTO Players (playerName, playerLink, position, Nationality, Team) VALUES (%s, %s, %s, %s, %s)",
-            (name, href, position, nationality, team)
-        )
+    # for name, (href, position, nationality, team) in player_dict.items():
+    #     cur.execute(
+    #         "INSERT INTO Players (playerName, playerLink, position, Nationality, Team) VALUES (%s, %s, %s, %s, %s)",
+    #         (name, href, position, nationality, team)
+    #     )
 
     finished = False
     while (finished is not True) :
