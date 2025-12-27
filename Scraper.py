@@ -27,7 +27,117 @@ cur = conn.cursor()
 
 driver = webdriver.Chrome()
 
+def teamsTable(driver):
+    table_element = driver.find_element(By.ID, "switcher_stats_squads_standard")
+    leagueHtml = table_element.get_attribute('outerHTML')
+    return leagueHtml
 
+def getTeamLinks(leagueHtml):
+    soup = BeautifulSoup(leagueHtml, "html.parser")
+    #Create a dictionary of TeamName : [Team link, [xg] ] pairs
+    team_dict = {}
+    rows = soup.find_all("tr")
+    for row in rows:
+        link = row.find("a")
+        if not link:
+            continue
+        name = link.text.strip()
+        teamLink = "https://fbref.com" + link.get('href')
+        # Visit team page and collect xG for current + previous 4 seasons
+        xg_list = []
+        try:
+            driver.get(teamLink)
+            for i in range(5):
+                # wait for the meta block to be present and parse it
+                try:
+                    meta_el = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.ID, "meta"))
+                    )
+                    meta_html = meta_el.get_attribute('outerHTML')
+                    soup_xg = BeautifulSoup(meta_html, "html.parser")
+                except Exception:
+                    # meta didn't load; try to advance once, otherwise pad and break
+                    try:
+                        prev_btn = driver.find_element(By.CSS_SELECTOR, "div#meta div.prevnext a")
+                        try:
+                            prev_btn.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", prev_btn)
+                        time.sleep(0.5)
+                        continue
+                    except Exception:
+                        for _ in range(i, 5):
+                            xg_list.append(None)
+                        break
+
+                # check header_end presence and whether it indicates a competition we accept
+                header_el = soup_xg.find("span", class_="header_end")
+                is_allowed_comp = False
+                if header_el and header_el.text:
+                    header_text = header_el.text.strip()
+                    allowed = ["Premier League", "Championship", "League One"]
+                    is_allowed_comp = any(a in header_text for a in allowed)
+
+                # if not on an allowed competition, navigate back until we find one or give up
+                nav_attempts = 0
+                while not is_allowed_comp and nav_attempts < 10:
+                    try:
+                        prev_btn = driver.find_element(By.CSS_SELECTOR, "div#meta div.prevnext a")
+                        try:
+                            prev_btn.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", prev_btn)
+
+                        WebDriverWait(driver, 8).until(
+                            lambda d: d.find_element(By.ID, "meta").get_attribute('outerHTML') != meta_html
+                        )
+                        time.sleep(0.5)
+                        meta_el = WebDriverWait(driver, 5).until(
+                            EC.presence_of_element_located((By.ID, "meta"))
+                        )
+                        meta_html = meta_el.get_attribute('outerHTML')
+                        soup_xg = BeautifulSoup(meta_html, "html.parser")
+                        header_el = soup_xg.find("span", class_="header_end")
+                        if header_el and header_el.text:
+                            header_text = header_el.text.strip()
+                            is_allowed_comp = any(a in header_text for a in ["Premier League", "Championship", "League One"])
+                        nav_attempts += 1
+                    except Exception:
+                        break
+
+                # extract xG only if we are on an allowed competition page
+                if is_allowed_comp:
+                    strong = soup_xg.find('strong', string=lambda s: s and 'xG' in s)
+                    if strong and strong.next_sibling:
+                        xg_text = strong.next_sibling.strip().replace(",", "")
+                        xg_list.append(xg_text if xg_text != '' else None)
+                    else:
+                        xg_list.append(None)
+                else:
+                    xg_list.append(None)
+
+                # advance one season for the next outer iteration; if can't, pad remaining and break
+                try:
+                    prev_btn = driver.find_element(By.CSS_SELECTOR, "div#meta div.prevnext a")
+                    try:
+                        prev_btn.click()
+                    except Exception:
+                        driver.execute_script("arguments[0].click();", prev_btn)
+                    WebDriverWait(driver, 8).until(
+                        lambda d: d.find_element(By.ID, "meta").get_attribute('outerHTML') != meta_html
+                    )
+                    time.sleep(0.5)
+                except Exception:
+                    for _ in range(i+1, 5):
+                        xg_list.append(None)
+                    break
+        except Exception as e:
+            print(f"Failed to load team page for {name}: {e}")
+            # if page fails to load entirely, ensure we have five None entries
+            xg_list = [None] * 5
+
+        team_dict[name] = [teamLink, xg_list]
+    return team_dict
 
 def leagueTable(driver):
     table_element = driver.find_element(By.ID, "div_stats_standard")
@@ -38,7 +148,7 @@ def leagueTable(driver):
     return html
 
 # player names are found here as well
-def getTeamLinks(html):
+def getPlayerLinks(html):
     soup = BeautifulSoup(html, "html.parser")
     player_dict = {}
     rows = soup.find_all("tr")
@@ -238,7 +348,7 @@ def getGoals(soup, season):
             goals = goals_cell.text.strip()
             
         xg_cell = season_row.find('td', {'data-stat': 'xg'})
-        if xg_cell:  # ← FIX: check xg_cell, not xg
+        if xg_cell:  
             xg = xg_cell.text.strip()
 
     return [goals, xg]
@@ -247,7 +357,11 @@ def main():
     base_url = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
     driver.get(base_url)
     html = leagueTable(driver)
-    player_dict = getTeamLinks(html)
+    #remove below
+    leagueHTML = teamsTable(driver)
+    team_dict = getTeamLinks(leagueHTML)
+    # print(team_dict)
+    player_dict = getPlayerLinks(html)
 
     # for name, (href, position, nationality, team) in player_dict.items():
     #     cur.execute(
