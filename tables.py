@@ -20,23 +20,34 @@ CREATE TABLE IF NOT EXISTS Players (
     playerName VARCHAR(100),
     position VARCHAR(20),
     playerLink TEXT,
-    Team TEXT,
-    Nationality TEXT
+    team TEXT,
+    nationality TEXT
 );
 
 CREATE TABLE IF NOT EXISTS Seasons (
     season_id SERIAL PRIMARY KEY,
     season_year VARCHAR(10) UNIQUE NOT NULL            
     );
+
+CREATE TABLE IF NOT EXISTS Teams (
+    team TEXT,
+    team_xG FLOAT,
+    season_id INTEGER,
+    PRIMARY KEY (team, season_id),
+    FOREIGN KEY (season_id) REFERENCES Seasons (season_id)
+);
             
 CREATE TABLE IF NOT EXISTS playerStats (
     player_id INTEGER,
     season_id INTEGER,
     goals INTEGER,
-    Xg FLOAT,
+    team TEXT,
+    xG FLOAT,
+    g90 FLOAT,
     PRIMARY KEY (player_id, season_id),
     FOREIGN KEY (player_id) REFERENCES Players (player_id),
-    FOREIGN KEY (season_id) REFERENCES Seasons (season_id)
+    FOREIGN KEY (season_id) REFERENCES Seasons (season_id),
+    FOREIGN KEY (team, season_id) REFERENCES Teams(team, season_id)
 );
             
 CREATE TABLE scrape_queue (
@@ -45,6 +56,14 @@ CREATE TABLE scrape_queue (
     last_attempt TIMESTAMP,
     error_message TEXT
 );
+            
+INSERT INTO Seasons (season_year)
+VALUES
+    ('2024-2025'),
+    ('2023-2024'),
+    ('2022-2023'),
+    ('2021-2022'),
+    ('2020-2021');
 
 """)
 

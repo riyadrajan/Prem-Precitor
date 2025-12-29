@@ -28,7 +28,7 @@ cur = conn.cursor()
 driver = webdriver.Chrome()
 
 def teamsTable(driver):
-    table_element = driver.find_element(By.ID, "switcher_stats_squads_standard")
+    table_element = driver.find_element(By.ID, "stats_squads_standard_for")
     leagueHtml = table_element.get_attribute('outerHTML')
     return leagueHtml
 
@@ -47,7 +47,7 @@ def getTeamLinks(leagueHtml):
         xg_list = []
         try:
             driver.get(teamLink)
-            for i in range(5):
+            for i in range(6):
                 # wait for the meta block to be present and parse it
                 try:
                     meta_el = WebDriverWait(driver, 10).until(
@@ -137,6 +137,14 @@ def getTeamLinks(leagueHtml):
             xg_list = [None] * 5
 
         team_dict[name] = [teamLink, xg_list]
+
+    for name in team_dict.keys():
+        for i in range(1, 6):  #skips 2025 - 2026 xG value
+            cur.execute("""
+                INSERT INTO Teams (team, team_xG, season_id) 
+                VALUES (%s, %s, %s)
+            """, (name, team_dict[name][1][i], i)) 
+    conn.commit()
     return team_dict
 
 def leagueTable(driver):
@@ -197,7 +205,7 @@ scrape from standard stats table
 iterate over the last 5 seasons for each player
 '''
 '''Process players in batches to prevent selenium web driver from timing out'''
-def getPlayerStats(player_dict):
+def getPlayerStats():
     batch_size = 10
     seasons = ['2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021']
     
@@ -233,6 +241,7 @@ def getPlayerStats(player_dict):
                 # Initialize to None
                 goals_value = None
                 xg_value = None
+                g90_value = None
                 
                 if stats and stats[0]:
                     try:
@@ -245,19 +254,25 @@ def getPlayerStats(player_dict):
                         xg_value = float(stats[1]) 
                     except (ValueError, TypeError):
                         xg_value = None
+
+                if stats and stats[2]:
+                    try:
+                        g90_value = float(stats[2]) 
+                    except (ValueError, TypeError):
+                        g90_value = None
                 
                 cur.execute("SELECT season_id FROM Seasons WHERE season_year = %s", (season,))
                 season_result = cur.fetchone()
                 
-                if season_result is not None:
+                if season_result:
                     season_id = season_result[0]  # Extract integer from tuple
                     
                     cur.execute("""
-                        INSERT INTO playerStats (player_id, season_id, goals, Xg)
-                        VALUES (%s, %s, %s, %s)
+                        INSERT INTO playerStats (player_id, season_id, goals, xG, g90)
+                        VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (player_id, season_id) 
-                        DO UPDATE SET goals = EXCLUDED.goals, Xg = EXCLUDED.Xg
-                    """, (player_id, season_id, goals_value, xg_value ))
+                        DO UPDATE SET goals = EXCLUDED.goals, xG = EXCLUDED.xG, g90 = EXCLUDED.g90
+                    """, (player_id, season_id, goals_value, xg_value, g90_value))
             
             # Mark as completed
             cur.execute("""
@@ -327,10 +342,11 @@ def getPlayerStats(player_dict):
     # print("Printed to Player-Link-df")
     # return df
 
-    
+# updated to return g/90 as well 
 def getGoals(soup, season):
     goals = None
     xg = None
+    g90 = None
     
     # Find the row for a specific season 
     season_row = soup.find('tr', {'id': 'stats'}, string=lambda s: s and season in s)
@@ -351,27 +367,33 @@ def getGoals(soup, season):
         if xg_cell:  
             xg = xg_cell.text.strip()
 
-    return [goals, xg]
+        g90_cell = season_row.find('td', {'data-stat': 'goals_per90'})
+        if g90_cell:
+            g90 = g90_cell.text.strip()
+
+    return [goals, xg, g90]
 
 def main():
+    '''scrape Teams first, then players, then remaining logic for forming the player stats that will be used for ML prediction'''
     base_url = "https://fbref.com/en/comps/9/stats/Premier-League-Stats"
     driver.get(base_url)
-    html = leagueTable(driver)
-    #remove below
-    leagueHTML = teamsTable(driver)
-    team_dict = getTeamLinks(leagueHTML)
-    # print(team_dict)
-    player_dict = getPlayerLinks(html)
+    # html = leagueTable(driver)
+    # #remove below
+    # leagueHTML = teamsTable(driver)
+    # team_dict = getTeamLinks(leagueHTML)
+    # # print(team_dict)
+    # player_dict = getPlayerLinks(html)
 
     # for name, (href, position, nationality, team) in player_dict.items():
     #     cur.execute(
-    #         "INSERT INTO Players (playerName, playerLink, position, Nationality, Team) VALUES (%s, %s, %s, %s, %s)",
+    #         "INSERT INTO Players (playerName, playerLink, position, nationality, team) VALUES (%s, %s, %s, %s, %s)",
     #         (name, href, position, nationality, team)
     #     )
 
+    '''forms player stats'''
     finished = False
     while (finished is not True) :
-        finished = getPlayerStats(player_dict)
+        finished = getPlayerStats()
         time.sleep(5)
 
     driver.quit()
@@ -390,5 +412,4 @@ if the player status is still pending, they need to be processed in the batch
 
 To be implemented:  get teams/squad for each season for a player
                     assign a weight of <1 for players outside the prem in previous seasons 
-                    in getGoals, also get expected goals
 '''
