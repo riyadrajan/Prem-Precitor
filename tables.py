@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS playerStats (
     FOREIGN KEY (team, season_id) REFERENCES Teams(team, season_id)
 );
             
-CREATE TABLE scrape_queue (
+CREATE TABLE IF NOT EXISTS scrape_queue (
     player_id INT PRIMARY KEY,
     status VARCHAR(20) DEFAULT 'pending',
     last_attempt TIMESTAMP,
