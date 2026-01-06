@@ -59,6 +59,17 @@ df["team_xg"] = df.groupby("team")["team_xg"].transform(
     lambda x: x.fillna(x.median())
 )
 
+# Create lagged dataset: Season N features → Season N+1 goals
+df_lagged = df.copy()
+df_lagged = df_lagged.sort_values(['player_id', 'season_year'])
+
+# For each player, shift goals up by 1 season (get next season's goals)
+df_lagged['next_season_goals'] = df_lagged.groupby('player_id')['goals'].shift(-1)
+
+# Remove rows where we don't have next season data
+df_lagged = df_lagged.dropna(subset=['next_season_goals'])
+df_lagged['next_season_goals'] = df_lagged['next_season_goals'].astype(int)
+
 # bruno = df[df["player_id"] == 73]
 # print(bruno)
 # print(df.dtypes)
@@ -100,22 +111,17 @@ pipe = Pipeline(steps=[
     ("model", PoissonRegressor(alpha=0.001, max_iter=1000))
 ])
 
-#filter out test year (2024 - 2025)
-train_df = df[df["season_year"].isin([
+# Train on 2020-2023 features → 2021-2024 goals (lagged prediction)
+train_df_lagged = df_lagged[df_lagged["season_year"].isin([
     "2020-2021",
     "2021-2022",
-    "2022-2023",
-    "2023-2024"
+    "2022-2023"
 ])]
 
-test_df = df[df["season_year"] == "2024-2025"]
-
-
-X_train = train_df[num_features + cat_features]
-y_train = train_df["goals"].astype(int)
+X_train = train_df_lagged[num_features + cat_features]
+y_train = train_df_lagged["next_season_goals"]
 
 pipe.fit(X_train, y_train)
-test_df["predicted goals"] = pipe.predict(test_df[num_features + cat_features])
 
 #Analyse the encoded feature names
 feature_names = pipe.named_steps["preprocess"].get_feature_names_out()
@@ -132,6 +138,24 @@ coef_df = (
     .sort_values("coef", ascending=False)
 )
 
-# print(coef_df)
+print(coef_df)
 
+"""Predict Haaland's 2025-2026 goals using 2024-2025 features"""
+haaland = df[df["playername"]=='Erling Haaland']
+haaland_2425 = haaland[haaland["season_year"] == "2024-2025"]
+features = ["xg", "g90", "team_xg", "team", "position"]
+X_haaland = haaland_2425[features]
+predicted_2526_goals = pipe.predict(X_haaland)[0]
+
+# used as the reference for testing predicted 2024/25 results against actual 24/25 results
+# in this case, the input to the model would have been the 2023/24 season (see haaland_2425)
+# haaland_accGoals = haaland[haaland["season_year"] == "2024-2025"] 
+# actualGoals = haaland_accGoals["goals"]
+# absError = abs (( (float(actualGoals) - float(predicted_2526_goals) ) / actualGoals) * 100)
+
+print(f"\nPredicting 2025-2026 Season:")
+print(f"Predicted Goals for Haaland (2025-2026): {predicted_2526_goals:.2f}")
+# print(f"Actual Goals for Haaland (2024-2025): {int(actualGoals)}")
+print(f"Based on 2024-2025 features: xG={haaland_2425['xg'].values[0]:.2f}, g90={haaland_2425['g90'].values[0]:.2f}, team_xG={haaland_2425['team_xg'].values[0]:.2f}")
+# print(f"Error: {absError}")
 conn.close()
